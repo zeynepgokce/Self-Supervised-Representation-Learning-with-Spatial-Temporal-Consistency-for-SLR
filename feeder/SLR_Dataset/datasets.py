@@ -9,6 +9,7 @@ class TotalDataset(torch.utils.data.Dataset):
     def __init__(self,
                  data_split='train',
                  data_root='/data',
+                 lowRes = False,
                  subset_name=['SLR500', 'MS_ASL', 'WLASL', 'NMFs_CSL'],
                  frames=65,
                  threshold=0.4,
@@ -26,6 +27,7 @@ class TotalDataset(torch.utils.data.Dataset):
         self.interval = interval
         self.hand_side = hand_side
         self.ds_ratio = ds_ratio
+        self.lowRes = lowRes
 
         dataset_to_index = {}
 
@@ -65,6 +67,7 @@ class TotalDataset(torch.utils.data.Dataset):
                 data_split=self.data_split,
                 interval=interval,
                 subset_num=wlasl_class_num,
+                lowRes = self.lowRes,
             )
             print(self.WLASL)
             dataset_to_index['WLASL'] = self.WLASL

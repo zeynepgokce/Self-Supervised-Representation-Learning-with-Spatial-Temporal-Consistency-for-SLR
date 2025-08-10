@@ -1,0 +1,4 @@
+Install environment :
+(base) zeynep@zeynep:~/Thesis/code/Self-Supervised-Representation-Learning-with-Spatial-Temporal-Consistency-for-SLR$ conda create --name SSRL python=3.8.13
+(SSRL) zeynep@zeynep:~/Thesis/code/Self-Supervised-Representation-Learning-with-Spatial-Temporal-Consistency-for-SLR$ conda install pytorch==1.8.1 torchvision torchaudio cudatoolkit=11.1 -c pytorch -c nvidia
+(SSRL) zeynep@zeynep:~/Thesis/code/Self-Supervised-Representation-Learning-with-Spatial-Temporal-Consistency-for-SLR$ conda install tensorboard=2.9.0 scikit-learn=1.1.1 tqdm=4.64.0 numpy=1.22.4

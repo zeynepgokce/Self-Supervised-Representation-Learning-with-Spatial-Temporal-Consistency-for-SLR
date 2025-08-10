@@ -8,5 +8,6 @@ class opts_SLR_cross_subject():
             'data_path': '/data',
             'num_frame_path': '/data',
             'l_ratio': [0.1, 1],
-            'input_size': 64
+            'input_size': 64,
+            'lowRes': False
         }

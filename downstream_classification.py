@@ -18,13 +18,15 @@ import moco.builder
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # change for action recogniton
-from dataset import get_finetune_training_set, get_finetune_validation_set
+from dataset import get_finetune_training_set, get_finetune_validation_set,get_finetune_test_set
 
+import torch
+torch.cuda.empty_cache()
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('-j', '--workers', default=8, type=int, metavar='N',
                     help='number of data loading workers (default: 32)')
-parser.add_argument('--epochs', default=80, type=int, metavar='N',
+parser.add_argument('--epochs', default=150, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -54,7 +56,7 @@ parser.add_argument('--gpu', default=None, type=int,
                     help='GPU id to use.')
 parser.add_argument('--dropout', '--dropout', default=None, type=float,
                     help='dropout in fc')
-parser.add_argument('--pretrained', default='', type=str,
+parser.add_argument('--pretrained', default='./ckpts/pretrained_model.pth.tar', type=str,
                     help='path to moco pretrained checkpoint')
 parser.add_argument('--finetune-dataset', default='ntu60', type=str,
                     help='which dataset to use for finetuning')
@@ -74,8 +76,9 @@ parser.add_argument('--eval_step', type=int, default=5, help='eval step')
 parser.add_argument('--view', type=str, default='all',help='joint|motion|all')
 parser.add_argument('--inter-dist', action='store_true',
                     help='use inter distillation loss')
-parser.add_argument('--save-ckpt', action='store_false', help='if you need to cancel save checkpoint')
+parser.add_argument('--save-ckpt', action='store_true', help='if you need to cancel save checkpoint')
 parser.add_argument('--protocol', type=str, default='finetune', help='finetune|semi')
+parser.add_argument('--lowRes', type=bool, default=True )
 best_acc1 = 0
 
 
@@ -157,17 +160,26 @@ def main_worker(gpu, ngpus_per_node, args):
     if args.finetune_dataset == 'SLR':
         opts = options.opts_SLR_cross_subject()
         opts.train_feeder_args['subset_name'] = args.subset_name
+        opts.val_feeder_args['subset_name'] = args.subset_name
         opts.test_feeder_args['subset_name'] = args.subset_name
         opts.train_feeder_args['num_class'] = args.num_class
+        opts.val_feeder_args['num_class'] = args.num_class
         opts.test_feeder_args['num_class'] = args.num_class
         opts.train_feeder_args['input_size'] = args.input_size
+        opts.val_feeder_args['input_size'] = args.input_size
         opts.test_feeder_args['input_size'] = args.input_size
+
         opts.num_class = args.num_class
     else:
         raise ValueError('Wrong finetune_dataset:', args.finetune_dataset)
 
     opts.train_feeder_args['input_representation'] = args.finetune_skeleton_representation
+    opts.val_feeder_args['input_representation'] = args.finetune_skeleton_representation
     opts.test_feeder_args['input_representation'] = args.finetune_skeleton_representation
+    opts.train_feeder_args['lowRes'] = args.lowRes
+    opts.test_feeder_args['lowRes'] = args.lowRes
+    opts.val_feeder_args['lowRes'] = args.lowRes
+
 
     print_config(args, args.checkpoint_path)
     if 'semi' in args.protocol:
@@ -179,7 +191,7 @@ def main_worker(gpu, ngpus_per_node, args):
     print("=> creating model")
 
     model = moco.builder.MoCo(args.finetune_skeleton_representation, opts.num_class, pretrain=False , dropout=args.dropout)
-    print("options", opts.num_class, opts.train_feeder_args, opts.test_feeder_args)
+    print("options", opts.num_class, opts.train_feeder_args,  opts.val_feeder_args,opts.test_feeder_args)
 
     if args.pretrained:
         # init the fc layer
@@ -237,6 +249,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     train_dataset = get_finetune_training_set(opts)
     val_dataset = get_finetune_validation_set(opts)
+    test_dataset = get_finetune_test_set(opts)
 
     train_sampler = None
 
@@ -249,6 +262,11 @@ def main_worker(gpu, ngpus_per_node, args):
         val_dataset,
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True,drop_last=False)
+
+    test_loader = torch.utils.data.DataLoader(
+	    test_dataset,
+	    batch_size=args.batch_size, shuffle=False,
+	    num_workers=args.workers, pin_memory=True, drop_last=False)
 
 
     for epoch in range(args.start_epoch, args.epochs):
@@ -264,33 +282,44 @@ def main_worker(gpu, ngpus_per_node, args):
         # evaluate on validation set
         if (epoch+1) % args.eval_step == 0:
             if 'MS_ASL' in args.subset_name or 'WLASL' in args.subset_name:
-                acc1, acc5, acc1_instance, acc5_instance = validate(val_loader, model, criterion, args)
-                writer.add_scalar('test_top1_instance', acc1_instance, global_step=epoch)
-                writer.add_scalar('test_top5_instance', acc5_instance, global_step=epoch)
-                print(f'test_top1_instance:{acc1_instance}, test_top5_instance:{acc5_instance}')
+                acc1, acc5, acc1_instance, acc5_instance = validate(val_loader, "val", model, criterion, args)
+                writer.add_scalar('val_top1_instance', acc1_instance, global_step=epoch)
+                writer.add_scalar('val_top5_instance', acc5_instance, global_step=epoch)
+                print(f'val_top1_instance:{acc1_instance}, val_top5_instance:{acc5_instance}')
             else:
-                acc1, acc5 = validate(val_loader, model, criterion, args)
-            writer.add_scalar('test_top1', acc1, global_step=epoch)
-            writer.add_scalar('test_top5', acc5, global_step=epoch)
-            print(f'top1:{acc1}, top5:{acc5}')
+                acc1, acc5 = validate(val_loader, "val", model, criterion, args)
+            writer.add_scalar('val_top1', acc1, global_step=epoch)
+            writer.add_scalar('val_top5', acc5, global_step=epoch)
+            print(f'val top1:{acc1}, top5:{acc5}')
         else:
             acc1 = 0
+
 
 
         # remember best acc@1 and save checkpoint
         is_best = acc1 > best_acc1
         if is_best:
-              print("found new best accuracy:= ",acc1)
-              best_acc1 = max(acc1, best_acc1)
+            print("found new best accuracy:= ",acc1)
+            best_acc1 = max(acc1, best_acc1)
 
-              if args.save_ckpt:
-                  save_checkpoint({
-                    'epoch': epoch + 1,
-                    'state_dict': model.state_dict(),
-                    'best_acc1': best_acc1,
-                    'optimizer' : optimizer.state_dict(),
+            if args.save_ckpt:
+                save_checkpoint({
+                'epoch': epoch + 1,
+                'state_dict': model.state_dict(),
+                'best_acc1': best_acc1,
+                'optimizer' : optimizer.state_dict(),
                 }, is_best,filename = args.checkpoint_path + '/best_checkpoint.pth.tar' )
-                  
+
+        # best epoch test
+        if 'MS_ASL' in args.subset_name or 'WLASL' in args.subset_name:
+            acc1, acc5, acc1_instance, acc5_instance = validate(test_loader, "test", model, criterion, args)
+            writer.add_scalar('Best test_top1_instance', acc1_instance, global_step=epoch)
+            writer.add_scalar('Best test_top5_instance', acc5_instance, global_step=epoch)
+            print(f'test results >> test_top1_instance:{acc1_instance}, test_top5_instance:{acc5_instance}')
+            writer.add_scalar('test_top1', acc1, global_step=epoch)
+            writer.add_scalar('test_top5', acc5, global_step=epoch)
+            print(f'test results >> top1:{acc1}, top5:{acc5}')
+        print("======================================================================")
 
 def train(train_loader, model, criterion, optimizer, epoch, args):
     batch_time = AverageMeter('Time', ':6.3f')
@@ -346,7 +375,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
             progress.display(i)
     return top1, top5, losses
 
-def validate(val_loader, model, criterion, args):
+def validate(val_loader, split, model, criterion, args):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
     top1 = AverageMeter('Acc@1', ':6.2f')
@@ -354,7 +383,7 @@ def validate(val_loader, model, criterion, args):
     progress = ProgressMeter(
         len(val_loader),
         [batch_time, losses, top1, top5],
-        prefix='Test: ')
+        prefix = 'Test: ' if split == "test" else 'Val: ')
     if 'MS_ASL' in args.subset_name or 'WLASL' in args.subset_name:
         instance_acc = class_accuracy(args.num_class)
     # switch to evaluate mode
@@ -389,8 +418,8 @@ def validate(val_loader, model, criterion, args):
                 instance_acc.update(output, target, (5,1))
 
         # TODO: this should also be done with the ProgressMeter
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-              .format(top1=top1, top5=top5))
+        print('>>>> {split} : Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
+              .format(split=split, top1=top1, top5=top5))
         if 'MS_ASL' in args.subset_name or 'WLASL' in args.subset_name:
             top1_acc, top5_acc = instance_acc.compute_avg()
             return top1.avg, top5.avg, top1_acc, top5_acc

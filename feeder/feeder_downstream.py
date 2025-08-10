@@ -27,7 +27,8 @@ class Feeder_SLR(torch.utils.data.Dataset):
                  data_ratio=None,
                  mmap=True,
                  subset_name=None,
-                 num_class=None
+                 num_class=None,
+                 lowRes=False
                  ):
         self.data_path = data_path
         self.num_frame_path = num_frame_path
@@ -38,10 +39,11 @@ class Feeder_SLR(torch.utils.data.Dataset):
         self.data_split = data_split
         self.data_ratio = data_ratio
         self.subset_name = subset_name
+        self.lowRes = lowRes
         assert len(subset_name) is not None
         assert num_class is not None
 
-        self.ds = datasets.TotalDataset(subset_name=subset_name, mask_frames=False, data_split=data_split,
+        self.ds = datasets.TotalDataset(subset_name=subset_name, data_split=data_split, lowRes=lowRes,
                                         wlasl_class_num=num_class if 'WLASL' in subset_name else 2000,
                                         msasl_class_num=num_class if 'MS_ASL' in subset_name else 1000)
         self.N = self.ds.len()

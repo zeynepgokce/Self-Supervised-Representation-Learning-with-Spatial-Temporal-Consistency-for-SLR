@@ -18,7 +18,7 @@ cache_home = 'your_path' # you can save pose data into .pkl file
 
 class WLASL(torch.utils.data.Dataset):
     def __init__(self,
-                 data_root='/data/WLASL',
+                 data_root='./data/WLASL',
                  data_split='train',
                  hand_side='right',
                  interval=2,
@@ -26,7 +26,8 @@ class WLASL(torch.utils.data.Dataset):
                  max_frames=150,
                  joints=21,
                  subset_num=2000,
-                 use_cache=True,
+                 use_cache=False,
+                 lowRes=False,
                  ):
         '''
         WLASL dataset pre-processing for Model-Aware Transformer
@@ -42,7 +43,7 @@ class WLASL(torch.utils.data.Dataset):
         if not os.path.exists(data_root):
             raise ValueError("data_root: %s not exist" % data_root)
         self.name = 'WLASL'
-        self.data_root = data_root
+        self.data_root = data_root +'/WLASL{a}'.format(a=subset_num) + ("_64x64" if lowRes else "")
         self.data_split = data_split
         self.interval = interval
         self.max_frames = max_frames
@@ -52,23 +53,26 @@ class WLASL(torch.utils.data.Dataset):
         self.hand_side = hand_side
         self.joints = joints
         self.use_cache = use_cache
-        subset_num = subset_num
+        self.subset_num = subset_num
+        self.lowRes = lowRes
         if self.data_split == 'train':
             video_list_train = np.genfromtxt(
-                os.path.join(self.data_root, 'traintestlist', 'WLASL{a}/trainlist01.txt'.format(a=subset_num)),
+                os.path.join(self.data_root,  'train.txt'.format(a=subset_num)),
                 delimiter=' ',
                 dtype=str).tolist()
+            video_list = video_list_train
+            self.annotation_path = os.path.join(self.data_root, 'Keypoints_2d_mmpose/train')
+        if self.data_split == 'val':
             video_list_val = np.genfromtxt(
-                os.path.join(self.data_root, 'traintestlist', 'WLASL{a}/vallist01.txt'.format(a=subset_num)),
+                os.path.join(self.data_root, 'val.txt'.format(a=subset_num)),
                 delimiter=' ',
                 dtype=str).tolist()
-            video_list = video_list_train + video_list_val
-            self.flag = len(video_list_train)
-            self.annotation_path = os.path.join(self.data_root, 'Keypoints_2d_mmpose')
+            video_list = video_list_val
+            self.annotation_path = os.path.join(self.data_root, 'Keypoints_2d_mmpose/val')
 
         elif self.data_split == 'test':
             video_list = np.genfromtxt(
-                os.path.join(self.data_root, 'traintestlist', 'WLASL{a}/testlist01.txt'.format(a=subset_num)),
+                os.path.join(self.data_root,  'test.txt'.format(a=subset_num)),
                 delimiter=' ',
                 dtype=str)
             self.annotation_path = os.path.join(self.data_root, 'Keypoints_2d_mmpose/test')
@@ -93,22 +97,21 @@ class WLASL(torch.utils.data.Dataset):
             ori_img_size = copy.deepcopy(self.pkl_data[video_name]['img_size'])
         else:
             if self.data_split == 'train':
-                if index < self.flag:
-                    data_split = 'train'
-                else:
-                    data_split = 'val'
-            else:
+                data_split = 'train'
+
+            elif self.data_split == 'val':
+                data_split = 'val'
+
+            else :
                 data_split = 'test'
-            sample_img = os.path.join(self.data_root, 'jpg_video_ori', data_split, video_name.split('.')[0],
-                                      'img_00001.jpg')
+
+            sample_img = os.path.join("/home/zeynep/Thesis/datasets/wlasl100_frames", data_split, video_name.split('.')[0],
+                                      'img_00001.bmp')
             img = Image.open(sample_img)
             ori_img_size = np.array([[img.width, img.height]], dtype=np.float32)
-            frames_path = os.path.join(self.data_root, 'jpg_video_ori', data_split, video_name.split('.')[0])
+            frames_path = os.path.join("/home/zeynep/Thesis/datasets/wlasl100_frames", data_split, video_name.split('.')[0])
             # import json file
-            if self.data_split == 'train':
-                json_path = os.path.join(self.annotation_path, data_split, video_name.split('.')[0] + '.pkl')
-            else:
-                json_path = os.path.join(self.annotation_path, video_name.split('.')[0] + '.pkl')
+            json_path = os.path.join(self.annotation_path, video_name.split('.')[0] + '.pkl')
             video_data = pkl.load(open(json_path, 'rb'))
         return video_data, ori_img_size
 
@@ -122,12 +125,12 @@ class WLASL(torch.utils.data.Dataset):
         label = int(video_index[1])
         video_data, ori_img_size = self.extractvideoinfo(index, video_name)
         video_joints = video_data['keypoints']
-        frame_list = video_data['img_list'][:-1]
+        frame_list = video_data['img_list']
 
         # if exceed max_frames, sample frames
         if len(frame_list) > self.max_frames:
             frame_index = slice(0, len(video_joints), max(self.interval, math.ceil(len(frame_list) / 150)))
-            video_joints = video_joints[frame_index, :, :]
+            video_joints = video_joints[frame_index]
             frame_list = frame_list[frame_index]
 
         # choose useful frames, delete invalid frames
@@ -242,7 +245,7 @@ class WLASL(torch.utils.data.Dataset):
         video_name = video_index[0]
         video_data, ori_img_size = self.extractvideoinfo(index, video_name)
         video_joints = video_data['keypoints']
-        frame_list = video_data['img_list'][:-1]
+        frame_list = video_data['img_list']
 
 
         root_pos = []
@@ -294,10 +297,10 @@ class WLASL(torch.utils.data.Dataset):
         video_name = video_index[0]
         video_data, ori_img_size = self.extractvideoinfo(index, video_name)
         video_joints = video_data['keypoints']
-        frame_list = video_data['img_list'][:-1]
+        frame_list = video_data['img_list']
         if len(frame_list) > self.max_frames:
             frame_index = slice(0, len(video_joints), max(self.interval, math.ceil(len(frame_list) / 150)))
-            video_joints = video_joints[frame_index, :, :]
+            video_joints = video_joints[frame_index ]
             frame_list = frame_list[frame_index]
         self.hand_side = 'right'
         _, _, _, frame_list_update_right = self.crop_hand(video_joints, ori_img_size,frame_list)
@@ -342,9 +345,13 @@ class WLASL(torch.utils.data.Dataset):
         frames_list_new = []
         frames_name_new = []
         bbxes = []
+        if len(frames_name)!=len(frames_list):
+            print("stop")
+        if (133,3) != frames_list[0].shape:
+            print("stop")
         for i in range(len(frames_name)):
-            skeleton = frames_list[i, :, 0:2]
-            confidence = frames_list[i, :, 2]
+            skeleton = frames_list[i][ :, 0:2]
+            confidence = frames_list[i][ :, 2]
             usz, vsz = [ori_img_size[0][0], ori_img_size[0][1]]
             minsz = min(usz, vsz)
             maxsz = max(usz, vsz)
